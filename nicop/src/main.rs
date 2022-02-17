@@ -1,7 +1,8 @@
 use rand::Rng;
 use std::collections::HashMap;
 use std::env;
-use std::fs;
+use std::fs::{self, File};
+use std::io::prelude::*;
 use unicode_normalization::UnicodeNormalization;
 
 #[derive(Debug)]
@@ -123,14 +124,11 @@ fn format_contents(contents: String) -> String {
 
 fn analyze_chars_frequencies(mut freq_table: FreqTable, contents: &String) -> Vec<char> {
 	let contents_chars: Vec<char> = contents.chars().collect();
-	println!("Calculating characters' frequencies...");
 	for i in 0..contents_chars.len() {
 		freq_table.add(i % 4, contents_chars[i]);
 	}
 	freq_table.get_most_frequent_chars()
 }
-
-
 
 fn main() {
 	let mut args: env::Args = env::args();
@@ -140,25 +138,44 @@ fn main() {
 		None => panic!("no path supplied"),
 	};
 
-	println!("Generating key...");
+	let dir_name = format!("runs/{:?}/", chrono::offset::Local::now());
+	print!("Spawning dirs...");
+	let _ = match fs::create_dir_all(&dir_name) {
+		Ok(_) => (),
+		Err(err) => panic!("could not create results directory: {err}"),
+	};
+	println!("\t\t\t\tOK");
+
+	print!("Generating encryption key...");
 	let key = Key::new();
+	println!("\t\t\t\tOK");
 	key.print();
-	
-	println!("Reading {fpath}...");
+	print!("Reading from {fpath}... ");
 	let mut contents = match fs::read_to_string(&fpath) {
 		Ok(con) => con,
 		Err(err) => panic!("could not read {fpath}: {err}"),
 	};
+	println!("\t\t\t\tOK");
 	contents = format_contents(contents);
-	
-	println!("Encrypting file contents...");
+	print!("Encrypting file contents...");
 	let encrypted_contents = encrypt(&Message::from_string(contents), &key).text;
-	println!("{encrypted_contents}");
-	
-	println!("Analyzing chars frequencies...");
+	let mut enc_fname = dir_name.clone();
+	enc_fname.push_str("enc.txt");
+	let mut encrypted_file = match File::create(&enc_fname) {
+		Ok(f) => f,
+		Err(err) => panic!("could not create {enc_fname}: {err}"),
+	};
+	let enc_bytes: Vec<u8> = encrypted_contents.bytes().collect();
+	match encrypted_file.write(&enc_bytes) {
+		Err(err) => panic!("could not write to file {enc_fname}: {err}"),
+		Ok(_) => (),
+	};
+	println!("\t\t\t\t\tOK ({enc_fname})");
+	print!("Analyzing chars frequencies...");
 	let most_freq_chars = analyze_chars_frequencies(FreqTable::new(), &encrypted_contents);
+	println!("\t\t\t\tOK");
 
-	println!("Generating possible decryption key...");
+	print!("Generating potential decryption key...");
 	let e_bytes = Message::from_string(String::from("E")).bytes;
 	let mut decryption_key_bytes = vec![vec![0u8; 2]; 4];
 	for i in 0..most_freq_chars.len() {
@@ -167,9 +184,21 @@ fn main() {
 		decryption_key_bytes[i][1] = e_bytes[0][1] ^ snd_most_freq_char_bytes[0][1];
 	}
 	let new_key = Key::from_bytes(decryption_key_bytes);
+	println!("\t\t\t\tOK");
 	new_key.print();
 
-	println!("Decrypting...");
-	let decryption_attempt = decrypt(&Message::from_string(encrypted_contents), &new_key);
-	println!("Done!\n{}", decryption_attempt.text);
+	print!("Decrypting...");
+	let decryption_attempt = decrypt(&Message::from_string(encrypted_contents), &new_key).text;
+	let mut dec_fname = dir_name.clone();
+	dec_fname.push_str("dec.txt");
+	let mut decrypted_file = match File::create(&dec_fname) {
+		Ok(f) => f,
+		Err(err) => panic!("could not create {dec_fname}: {err}"),
+	};
+	let dec_bytes: Vec<u8> = decryption_attempt.bytes().collect();
+	match decrypted_file.write(&dec_bytes) {
+		Err(err) => panic!("could not write to file {enc_fname}: {err}"),
+		Ok(_) => (),
+	};
+	println!("\t\t\t\tOK ({dec_fname})");
 }
